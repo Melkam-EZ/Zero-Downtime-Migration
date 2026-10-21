@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16 haproxy
+      - run: python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+      - run: sudo -E .venv/bin/python -m pytest -q       # unit + integration (real Postgres and HAProxy)
+      - run: bash -n scripts/*.sh db/init.sh
+      - run: docker compose config -q
+        env: { PG_PASSWORD: x, APP_PASSWORD: x, REPL_PASSWORD: x }

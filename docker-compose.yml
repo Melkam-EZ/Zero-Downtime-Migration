@@ -1,0 +1,60 @@
+# Legacy stack (db-old + app-legacy v1), modern stack (db-new + app-modern v2), and HAProxy in front of both.
+# Everything is published on 127.0.0.1 only. The HAProxy admin socket (9999) has admin rights: never expose it.
+x-db: &db
+  image: postgres:16.4
+  command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+  environment:
+    POSTGRES_PASSWORD: ${PG_PASSWORD}
+    POSTGRES_DB: shop
+    APP_PASSWORD: ${APP_PASSWORD}
+    REPL_PASSWORD: ${REPL_PASSWORD}
+  volumes:
+    - ./db/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
+services:
+  db-old:
+    <<: *db
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - ./db/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - old-data:/var/lib/postgresql/data
+
+  db-new:
+    <<: *db
+    ports: ["127.0.0.1:5434:5432"]
+    volumes:
+      - ./db/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - new-data:/var/lib/postgresql/data
+
+  app-legacy:
+    build: ./app
+    environment: { APP_VERSION: v1, APP_NAME: legacy, PORT: "8000", DATABASE_URL: "postgresql://app:${APP_PASSWORD}@db-old:5432/shop" }
+    depends_on: { db-old: { condition: service_healthy } }
+    ports: ["127.0.0.1:8001:8000"]
+
+  app-modern:
+    build: ./app
+    environment: { APP_VERSION: v2, APP_NAME: modern, PORT: "8000", DATABASE_URL: "postgresql://app:${APP_PASSWORD}@db-new:5432/shop" }
+    depends_on: { db-new: { condition: service_healthy } }
+    ports: ["127.0.0.1:8002:8000"]
+
+  proxy:
+    image: haproxy:2.8
+    environment:
+      LEGACY_ADDR: app-legacy:8000
+      MODERN_ADDR: app-modern:8000
+      PROXY_BIND: "*:8080"
+      ADMIN_BIND: "ipv4@0.0.0.0:9999"
+      ERRORFILE: /usr/local/etc/haproxy/errors-503.http
+    volumes: ["./haproxy:/usr/local/etc/haproxy:ro"]
+    depends_on: [app-legacy, app-modern]
+    ports: ["127.0.0.1:8080:8080", "127.0.0.1:9999:9999"]
+
+volumes:
+  old-data:
+  new-data:

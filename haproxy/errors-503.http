@@ -1,0 +1,7 @@
+HTTP/1.0 503 Service Unavailable
+Cache-Control: no-cache
+Connection: close
+Content-Type: application/json
+Retry-After: 1
+
+{"error":"temporarily unavailable (writes pause briefly during migration cutover)"}
